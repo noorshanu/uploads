@@ -1,0 +1,48 @@
+"use strict";
+var __importDefault = (this && this.__importDefault) || function (mod) {
+    return (mod && mod.__esModule) ? mod : { "default": mod };
+};
+Object.defineProperty(exports, "__esModule", { value: true });
+exports.PRIORITY_FEE_IX = exports.ACCNT_CREATION_FEES = exports.PRIORITY_FEE_AMT = exports.MPL_TOKEN_METADATA_PROGRAM_ID = exports.GLOBALSTATE = exports.EVENT_AUTH = exports.FEERCPT = exports.MEMO_PROGRAM_ID = exports.programID = exports.JitoPvtAuthKeys = exports.CONFIRMATIONTIMEOUT = exports.jitoTips = exports.priorityFees = exports.slippageDefault = exports.randomSellWalletsCount = exports.DEFAULT_TOKEN = exports.PROGRAM_ID = exports.addLookupTableInfo = exports.makeTxVersion = exports.senderWallet = exports.mainWallet = exports.connection = exports.perKToken = exports.isDevnet = exports.boosterList = exports.dropList = void 0;
+const web3_js_1 = require("@solana/web3.js");
+const bs58_1 = __importDefault(require("bs58"));
+const raydium_sdk_1 = require("@raydium-io/raydium-sdk");
+require('dotenv').config();
+const RPC_URL = 'https://lingering-damp-lambo.solana-mainnet.quiknode.pro/41ced52afd17c1798eb1b6524ae12a981521a1d4';
+const MAINWALLET = process.env.MAIN_WALLET_KEY;
+const SENDERWALLET = process.env.SENDER_WALLET_KEY;
+const NETWORK = process.env.NETWORK;
+const RSELL = process.env.randomSellWalletsCount;
+const JITOKEYS = process.env.JITOKEYS;
+const SL = process.env.DEFAULT_SLIPPAGE;
+const PF = process.env.PRIORITYFEE;
+const JT = process.env.JITOTIPS;
+const TO = process.env.TIMEOUT;
+exports.dropList = [];
+exports.boosterList = [];
+exports.isDevnet = NETWORK == 'devnet';
+exports.perKToken = 2.8e-8;
+exports.connection = NETWORK == 'mainnet' ? new web3_js_1.Connection(RPC_URL, 'finalized') : new web3_js_1.Connection((0, web3_js_1.clusterApiUrl)('devnet'), 'finalized');
+exports.mainWallet = web3_js_1.Keypair.fromSecretKey(bs58_1.default.decode(MAINWALLET));
+exports.senderWallet = web3_js_1.Keypair.fromSecretKey(bs58_1.default.decode(SENDERWALLET));
+exports.makeTxVersion = raydium_sdk_1.TxVersion.V0;
+exports.addLookupTableInfo = NETWORK == 'mainnet' ? raydium_sdk_1.LOOKUP_TABLE_CACHE : undefined;
+exports.PROGRAM_ID = NETWORK == 'mainnet' ? raydium_sdk_1.MAINNET_PROGRAM_ID : raydium_sdk_1.DEVNET_PROGRAM_ID;
+exports.DEFAULT_TOKEN = {
+    'WSOL': new raydium_sdk_1.Token(raydium_sdk_1.TOKEN_PROGRAM_ID, new web3_js_1.PublicKey('So11111111111111111111111111111111111111112'), 9, 'WSOL', 'WSOL'),
+};
+exports.randomSellWalletsCount = RSELL;
+exports.slippageDefault = SL;
+exports.priorityFees = PF;
+exports.jitoTips = JT;
+exports.CONFIRMATIONTIMEOUT = TO;
+exports.JitoPvtAuthKeys = JITOKEYS;
+exports.programID = new web3_js_1.PublicKey("6EF8rrecthR5Dkzon8Nwu78hRvfCKubJ14M5uBEwF6P");
+exports.MEMO_PROGRAM_ID = new web3_js_1.PublicKey('MemoSq4gqABAXKb96qnH8TysNcWxMyWCqXgDLGmfcHr');
+exports.FEERCPT = new web3_js_1.PublicKey("CebN5WGQ4jvEPvsVU4EoHEpgzq1VV7AbicfhtW4xC9iM");
+exports.EVENT_AUTH = new web3_js_1.PublicKey("Ce6TQqeHC9p8KetsN6JsjHK7UTZk7nasjjnr7XxXp9F1");
+exports.GLOBALSTATE = new web3_js_1.PublicKey("4wTV1YmiEkRvAtNtsSGPtUrqRYQMe5SKy2uB4Jjaxnjf");
+exports.MPL_TOKEN_METADATA_PROGRAM_ID = new web3_js_1.PublicKey("metaqbxxUerdq28cj1RbAWkYQm3ybzjb6a8bt518x1s");
+exports.PRIORITY_FEE_AMT = exports.priorityFees * web3_js_1.LAMPORTS_PER_SOL;
+exports.ACCNT_CREATION_FEES = 0.0025 * web3_js_1.LAMPORTS_PER_SOL;
+exports.PRIORITY_FEE_IX = web3_js_1.ComputeBudgetProgram.setComputeUnitPrice({ microLamports: exports.PRIORITY_FEE_AMT });
