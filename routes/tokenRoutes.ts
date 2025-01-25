@@ -16,6 +16,10 @@ import {getAssociatedTokenAddressSync, getAssociatedTokenAddress, createAssociat
 import * as anchor from '@coral-xyz/anchor';
 import { encodeCreateInstruction } from '../services/decode';
 import { BN } from "@coral-xyz/anchor";
+import multer from 'multer';
+import FormData from 'form-data';
+import fetch from 'node-fetch';
+import axios from 'axios';
 
 
 
@@ -374,7 +378,7 @@ router.post('/create-metadata', async (req: Request, res: Response) => {
 
     console.log(mintKeypair);
 
-    const contractAddress = displayPublicKey;
+    let contractAddress;
     console.log(initialBuyAmount);
     let mintSecretKey;
 
@@ -385,6 +389,8 @@ router.post('/create-metadata', async (req: Request, res: Response) => {
     }
 
     console.log("mintSecretKey", mintSecretKey);
+    contractAddress = Keypair.fromSecretKey(bs58.decode(mintSecretKey)).publicKey.toBase58();
+
 
     const newToken = new Token({ 
       name, 
@@ -959,5 +965,105 @@ router.post('/create-new', async (req: Request, res: Response) => {
   } 
 });
 
+// Configure multer storage
+const storage = multer.memoryStorage();
+const upload = multer({
+  storage: storage,
+  fileFilter: (req, file, cb) => {
+    if (file.mimetype.startsWith('image/')) {
+      cb(null, true);
+    } else {
+      cb(new Error('Only image files are allowed!'));
+    }
+  },
+  limits: {
+    fileSize: 5 * 1024 * 1024, // 5MB limit
+  },
+});
+
+router.post('/upload-metadata', upload.single('file'), async (req: Request, res: Response) => {
+  try {
+    // Extract data from request
+    const { 
+      name, 
+      symbol, 
+      description, 
+      twitter, 
+      telegram, 
+      website 
+    } = req.body;
+
+    // Create form data for IPFS
+    const formData = new FormData();
+
+    // Add file if it exists
+    if (req.file) {
+      formData.append('file', req.file.buffer, {
+        filename: 'logo.png',
+        contentType: req.file.mimetype
+      });
+    }
+
+    // Add metadata fields with null checks
+    formData.append('name', name || '');
+    formData.append('symbol', symbol || '');
+    formData.append('description', description || '');
+    // Only append social links if they exist and aren't "undefined"
+    if (twitter && twitter !== 'undefined') formData.append('twitter', twitter);
+    if (telegram && telegram !== 'undefined') formData.append('telegram', telegram);
+    if (website && website !== 'undefined') formData.append('website', website);
+    formData.append('showName', 'true');
+
+    console.log('Uploading to IPFS with data:', {
+      name,
+      symbol,
+      description,
+      twitter,
+      telegram,
+      website,
+      hasFile: !!req.file
+    });
+
+    // Upload to IPFS through pump.fun API
+    const response = await fetch('https://pump.fun/api/ipfs', {
+      method: 'POST',
+      body: formData,
+      headers: {
+        ...formData.getHeaders(),
+      }
+    });
+
+    if (!response.ok) {
+      throw new Error(`IPFS upload failed with status: ${response.status}`);
+    }
+
+    const ipfsData = await response.json();
+
+    // Clean up the metadata before sending response
+    if (ipfsData.metadata) {
+      // Remove undefined social links
+      if (ipfsData.metadata.twitter === 'undefined') delete ipfsData.metadata.twitter;
+      if (ipfsData.metadata.telegram === 'undefined') delete ipfsData.metadata.telegram;
+      if (ipfsData.metadata.website === 'undefined') delete ipfsData.metadata.website;
+    }
+
+    console.log('IPFS upload successful:', ipfsData);
+
+    // Send response back to client
+    res.status(200).json({
+      success: true,
+      message: 'Metadata uploaded successfully',
+      data: ipfsData
+    });
+
+  } catch (error) {
+    console.error('Error in /upload-metadata:', error);
+    res.status(500).json({
+      success: false,
+      message: 'Failed to upload metadata',
+      error: error instanceof Error ? error.message : 'Unknown error'
+    });
+  }
+});
 
 export default router;
