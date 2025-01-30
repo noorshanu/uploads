@@ -38,7 +38,6 @@ Object.defineProperty(exports, "__esModule", { value: true });
 exports.createMetadata = createMetadata;
 exports.createToken2 = createToken2;
 const bs58_1 = __importDefault(require("bs58"));
-const node_fetch_1 = __importDefault(require("node-fetch"));
 const promises_1 = __importDefault(require("fs/promises"));
 const form_data_1 = __importDefault(require("form-data"));
 const anchor = __importStar(require("@coral-xyz/anchor"));
@@ -92,11 +91,11 @@ function createMetadata(formData, keypairType, grindedPrivateKey, displayPublicK
         ipfsFormData.append("telegram", formData.telegram);
         ipfsFormData.append("website", formData.website);
         ipfsFormData.append("showName", "true");
-        const metadataResponse = yield (0, node_fetch_1.default)("https://pump.fun/api/ipfs", {
-            method: "POST",
-            body: ipfsFormData,
-            headers: ipfsFormData.getHeaders()
-        });
+        // const metadataResponse = await fetch("https://pump.fun/api/ipfs", {
+        //   method: "POST",
+        //   body: ipfsFormData,
+        //   headers: ipfsFormData.getHeaders()
+        // });
         return {
             mintKeypair,
         };

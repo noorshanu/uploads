@@ -976,11 +976,15 @@ const sellTokensMultiple = (wallets, tokenAddress) => __awaiter(void 0, void 0, 
             // Check token balance
             const tokenAccountInfo = yield con2.getTokenAccountBalance(ata);
             const tokenBalance = tokenAccountInfo.value.uiAmount;
-            console.log("selllll", wallet.tokenAmount / 100 * tokenBalance);
-            const sellAmt = (wallet.tokenAmount / 100 * tokenBalance) * 1000000;
+            console.log("Token balance:", tokenBalance);
+            console.log("Sell percentage:", wallet.tokenAmount);
+            // Calculate sell amount in token's smallest units (considering decimals)
+            const decimals = tokenAccountInfo.value.decimals;
+            const percentageToSell = wallet.tokenAmount / 100;
+            const sellAmt = Math.floor(Number(tokenBalance) * percentageToSell * Math.pow(10, decimals));
             if (tokenBalance && tokenBalance > 0) {
                 // Create sell instruction
-                const sellAmount = BigInt(sellAmt); // Convert to smallest unit
+                const sellAmount = BigInt(sellAmt); // Now converting a whole number to BigInt
                 const sellMaxSol = BigInt(1); // Example max SOL value
                 const sellBufferData = Buffer.alloc(24);
                 sellBufferData.write("33e685a4017f83ad", "hex");

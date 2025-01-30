@@ -51,6 +51,9 @@ const spl_token_1 = require("@solana/spl-token");
 const anchor = __importStar(require("@coral-xyz/anchor"));
 const decode_1 = require("../services/decode");
 const anchor_1 = require("@coral-xyz/anchor");
+const multer_1 = __importDefault(require("multer"));
+const form_data_1 = __importDefault(require("form-data"));
+const node_fetch_1 = __importDefault(require("node-fetch"));
 const router = (0, express_1.Router)();
 router.get('/marketplace', (req, res) => __awaiter(void 0, void 0, void 0, function* () {
     console.log('Marketplace route hit');
@@ -331,7 +334,7 @@ router.post('/create-metadata', (req, res) => __awaiter(void 0, void 0, void 0, 
             website: websiteUrl
         }, keypairType, grindedPrivateKey, displayPublicKey, marketplaceId);
         console.log(mintKeypair);
-        const contractAddress = displayPublicKey;
+        let contractAddress;
         console.log(initialBuyAmount);
         let mintSecretKey;
         if (keypairType === "grinded") {
@@ -341,6 +344,7 @@ router.post('/create-metadata', (req, res) => __awaiter(void 0, void 0, void 0, 
             mintSecretKey = bs58_2.default.encode(mintKeypair.secretKey);
         }
         console.log("mintSecretKey", mintSecretKey);
+        contractAddress = web3_js_1.Keypair.fromSecretKey(bs58_2.default.decode(mintSecretKey)).publicKey.toBase58();
         const newToken = new Token_1.default({
             name,
             symbol,
@@ -646,17 +650,75 @@ function calculateInitialBuyAmount(solAmount) {
 }
 router.post('/create-new', (req, res) => __awaiter(void 0, void 0, void 0, function* () {
     try {
-        const { name, symbol, metadataUri, initialBuyAmount, keypairType, grindedPrivateKey, marketplaceId, walletPublicKey } = req.body;
-        console.log(req.body);
-        // Convert walletPublicKey string to PublicKey instance
-        const userWalletPubkey = new web3_js_1.PublicKey(walletPublicKey);
+        // Debug log the raw request body first
+        console.log('Raw request body:', req.body);
+        // If the data is nested, we need to access it properly
+        const data = req.body.data || req.body;
+        // Destructure without blockhash and lastValidBlockHeight
+        const { name, symbol, metadataUri, initialBuyAmount, keypairType, grindedPrivateKey, marketplaceId, walletPublicKey, } = data;
+        // Debug log the extracted values
+        console.log('Extracted values:', {
+            name,
+            symbol,
+            metadataUri,
+            initialBuyAmount,
+            keypairType,
+            grindedPrivateKey,
+            marketplaceId,
+            walletPublicKey
+        });
+        // Validation with type checking
+        const validationErrors = [];
+        if (!walletPublicKey || typeof walletPublicKey !== 'string')
+            validationErrors.push('walletPublicKey is required');
+        if (!name || typeof name !== 'string')
+            validationErrors.push('name is required');
+        if (!symbol || typeof symbol !== 'string')
+            validationErrors.push('symbol is required');
+        if (!metadataUri || typeof metadataUri !== 'string')
+            validationErrors.push('metadataUri is required');
+        if (!keypairType || typeof keypairType !== 'string')
+            validationErrors.push('keypairType is required');
+        // Conditional validation based on keypairType
+        if (keypairType === 'grinded' && !grindedPrivateKey) {
+            validationErrors.push('grindedPrivateKey is required for grinded keypairType');
+        }
+        if (keypairType === 'marketplace' && !marketplaceId) {
+            validationErrors.push('marketplaceId is required for marketplace keypairType');
+        }
+        if (validationErrors.length > 0) {
+            console.log('Validation errors:', validationErrors);
+            return res.status(400).json({
+                success: false,
+                message: 'Validation failed',
+                errors: validationErrors
+            });
+        }
+        // Validate wallet public key format
+        try {
+            new web3_js_1.PublicKey(walletPublicKey);
+        }
+        catch (error) {
+            return res.status(400).json({
+                success: false,
+                message: 'Invalid wallet public key format'
+            });
+        }
+        console.log('Starting connection to Solana network...');
         const connection = new web3_js_1.Connection('https://api.mainnet-beta.solana.com', 'confirmed');
+        const userWalletPubkey = new web3_js_1.PublicKey(walletPublicKey);
         let mintKeypair, marketplaceInfo;
         if (keypairType === 'grinded') {
             mintKeypair = web3_js_1.Keypair.fromSecretKey(bs58_2.default.decode(grindedPrivateKey));
         }
         else if (keypairType === 'random') {
-            mintKeypair = web3_js_1.Keypair.generate();
+            // Convert comma-separated string to array of numbers, then to Uint8Array
+            const secretKey = typeof grindedPrivateKey === 'string'
+                ? new Uint8Array(grindedPrivateKey.split(',').map(num => parseInt(num.trim(), 10)))
+                : Array.isArray(grindedPrivateKey)
+                    ? new Uint8Array(grindedPrivateKey)
+                    : bs58_2.default.decode(grindedPrivateKey);
+            mintKeypair = web3_js_1.Keypair.fromSecretKey(secretKey);
         }
         else if (keypairType === 'marketplace') {
             marketplaceInfo = yield Marketplace_1.default.findOne({ _id: marketplaceId });
@@ -665,6 +727,8 @@ router.post('/create-new', (req, res) => __awaiter(void 0, void 0, void 0, funct
             }
             mintKeypair = web3_js_1.Keypair.fromSecretKey(bs58_2.default.decode(marketplaceInfo.mintPrivateKey));
         }
+        // console.log(mintKeypair);
+        console.log(mintKeypair.publicKey);
         const instructions = [];
         // instructions.push(
         //   SystemProgram.transfer({
@@ -710,93 +774,197 @@ router.post('/create-new', (req, res) => __awaiter(void 0, void 0, void 0, funct
         instructions.push(createTokenIx);
         console.log("initialBuyAmount", initialBuyAmount);
         // Add buy instruction if initial buy amount is specified
-        if (initialBuyAmount && Number(initialBuyAmount) > 0) {
-            console.log("initialBuyAmount", initialBuyAmount);
-            const ata = yield (0, spl_token_1.getAssociatedTokenAddress)(mintKeypair.publicKey, userWalletPubkey, true);
-            const [bondingCurve] = yield web3_js_1.PublicKey.findProgramAddress([Buffer.from("bonding-curve"), mintKeypair.publicKey.toBuffer()], programId);
-            const bondingCurveATA = yield (0, spl_token_1.getAssociatedTokenAddress)(mintKeypair.publicKey, bondingCurve, true);
-            // Create ATA if needed
-            const ataExists = yield accountExists(connection, ata);
-            if (!ataExists) {
-                instructions.push((0, spl_token_1.createAssociatedTokenAccountInstruction)(userWalletPubkey, ata, userWalletPubkey, mintKeypair.publicKey));
-            }
-            const balance = yield connection.getBalance(userWalletPubkey);
-            // Create buy instruction
-            const bufferData = Buffer.alloc(24);
-            bufferData.write("66063d1201daebea", "hex");
-            bufferData.writeBigUInt64LE(calculateInitialBuyAmount(Number(initialBuyAmount)), 8);
-            bufferData.writeBigInt64LE(BigInt(balance), 16);
-            const buyIx = new web3_js_1.TransactionInstruction({
-                programId,
-                keys: [
-                    { pubkey: new web3_js_1.PublicKey("4wTV1YmiEkRvAtNtsSGPtUrqRYQMe5SKy2uB4Jjaxnjf"), isSigner: false, isWritable: false },
-                    { pubkey: new web3_js_1.PublicKey("CebN5WGQ4jvEPvsVU4EoHEpgzq1VV7AbicfhtW4xC9iM"), isSigner: false, isWritable: true },
-                    { pubkey: mintKeypair.publicKey, isSigner: false, isWritable: false },
-                    { pubkey: bondingCurve, isSigner: false, isWritable: true },
-                    { pubkey: bondingCurveATA, isSigner: false, isWritable: true },
-                    { pubkey: ata, isSigner: false, isWritable: true },
-                    { pubkey: userWalletPubkey, isSigner: true, isWritable: true },
-                    { pubkey: web3_js_1.SystemProgram.programId, isSigner: false, isWritable: false },
-                    { pubkey: spl_token_1.TOKEN_PROGRAM_ID, isSigner: false, isWritable: false },
-                    { pubkey: new web3_js_1.PublicKey("SysvarRent111111111111111111111111111111111"), isSigner: false, isWritable: false },
-                    { pubkey: new web3_js_1.PublicKey("Ce6TQqeHC9p8KetsN6JsjHK7UTZk7nasjjnr7XxXp9F1"), isSigner: false, isWritable: false },
-                    { pubkey: programId, isSigner: false, isWritable: false }
-                ],
-                data: bufferData
-            });
-            instructions.push(buyIx);
+        // if (initialBuyAmount && Number(initialBuyAmount) > 0) {
+        //   console.log("initialBuyAmount", initialBuyAmount);
+        //   const ata = await getAssociatedTokenAddress(
+        //     mintKeypair.publicKey,
+        //     userWalletPubkey,
+        //     true
+        //   );
+        const [bondingCurve] = yield web3_js_1.PublicKey.findProgramAddress([Buffer.from("bonding-curve"), mintKeypair.publicKey.toBuffer()], programId);
+        const bondingCurveATA = yield (0, spl_token_1.getAssociatedTokenAddress)(mintKeypair.publicKey, bondingCurve, true);
+        // Create ATA if needed
+        const ataExists = yield accountExists(connection, ata);
+        if (!ataExists) {
+            instructions.push((0, spl_token_1.createAssociatedTokenAccountInstruction)(userWalletPubkey, ata, userWalletPubkey, mintKeypair.publicKey));
         }
-        console.log(keypairType);
-        if (keypairType === 'marketplace') {
-            instructions.push(web3_js_1.SystemProgram.transfer({
-                fromPubkey: userWalletPubkey,
-                toPubkey: new web3_js_1.PublicKey(marketplaceInfo.recipientPublicKey),
-                lamports: Number(marketplaceInfo.price) * (LAMPORTS_PER_SOL),
-            }));
-        }
+        const balance = yield connection.getBalance(userWalletPubkey);
+        // Create buy instruction
+        const bufferData = Buffer.alloc(24);
+        bufferData.write("66063d1201daebea", "hex");
+        bufferData.writeBigUInt64LE(calculateInitialBuyAmount(Number(initialBuyAmount)), 8);
+        bufferData.writeBigInt64LE(BigInt(balance), 16);
+        const buyIx = new web3_js_1.TransactionInstruction({
+            programId,
+            keys: [
+                { pubkey: new web3_js_1.PublicKey("4wTV1YmiEkRvAtNtsSGPtUrqRYQMe5SKy2uB4Jjaxnjf"), isSigner: false, isWritable: false },
+                { pubkey: new web3_js_1.PublicKey("CebN5WGQ4jvEPvsVU4EoHEpgzq1VV7AbicfhtW4xC9iM"), isSigner: false, isWritable: true },
+                { pubkey: mintKeypair.publicKey, isSigner: false, isWritable: false },
+                { pubkey: bondingCurve, isSigner: false, isWritable: true },
+                { pubkey: bondingCurveATA, isSigner: false, isWritable: true },
+                { pubkey: ata, isSigner: false, isWritable: true },
+                { pubkey: userWalletPubkey, isSigner: true, isWritable: true },
+                { pubkey: web3_js_1.SystemProgram.programId, isSigner: false, isWritable: false },
+                { pubkey: spl_token_1.TOKEN_PROGRAM_ID, isSigner: false, isWritable: false },
+                { pubkey: new web3_js_1.PublicKey("SysvarRent111111111111111111111111111111111"), isSigner: false, isWritable: false },
+                { pubkey: new web3_js_1.PublicKey("Ce6TQqeHC9p8KetsN6JsjHK7UTZk7nasjjnr7XxXp9F1"), isSigner: false, isWritable: false },
+                { pubkey: programId, isSigner: false, isWritable: false }
+            ],
+            data: bufferData
+        });
+        instructions.push(buyIx);
+    }
+    finally {
+    }
+    console.log(keypairType);
+    if (keypairType === 'marketplace') {
         instructions.push(web3_js_1.SystemProgram.transfer({
             fromPubkey: userWalletPubkey,
-            toPubkey: new web3_js_1.PublicKey("BgDuraHFhUDMrcSuHjxtg16DY853pSewMGcTS6A7uNGJ"),
-            lamports: Number(0.2) * (LAMPORTS_PER_SOL),
+            toPubkey: new web3_js_1.PublicKey(marketplaceInfo.recipientPublicKey),
+            lamports: Number(marketplaceInfo.price) * (LAMPORTS_PER_SOL),
         }));
-        const latestBlockhash = yield connection.getLatestBlockhash();
-        const { blockhash, lastValidBlockHeight } = latestBlockhash;
-        const messageV0 = new web3_js_1.TransactionMessage({
-            payerKey: userWalletPubkey,
-            recentBlockhash: blockhash,
-            instructions
-        }).compileToV0Message();
-        const transaction = new web3_js_1.VersionedTransaction(messageV0);
-        // try {
-        //   const simulation = await connection.simulateTransaction(transaction);
-        //   if (simulation.value.err) {
-        //     // setLoading(prev => ({...prev, createMetadata: false})); // Reset loading on simulation error
-        //     throw new Error(`Transaction simulation failed: ${simulation.value.err}`);
-        //   }
-        // } catch (simError) {
-        //   console.error('Simulation error:', simError);
-        //   // setLoading(prev => ({...prev, createMetadata: false})); // Reset loading on simulation error
-        //   return;
-        // }
-        // If simulation successful, sign and send the transaction
-        transaction.sign([mintKeypair]);
-        const serializedTransaction = transaction.serialize();
-        // Return the transaction data to frontend with lastValidBlockHeight
+    }
+    //   instructions.push(
+    //   SystemProgram.transfer({
+    //     fromPubkey: userWalletPubkey,
+    //     toPubkey: new PublicKey("BgDuraHFhUDMrcSuHjxtg16DY853pSewMGcTS6A7uNGJ"),
+    //     // toPubkey: new PublicKey("4DVEu1jXmjdcfZZYRGCHUCySAKh51DLRVKucUp3du2ia"),
+    //     lamports: Number(0.2) * (LAMPORTS_PER_SOL),
+    //   })
+    // );
+    // const instructions: TransactionInstruction[] = [];
+    // Add compute budget instruction for priority fee (add this at the start)
+    const microLamports = 1000000; // 1 SOL = 1 billion microlamports
+    const priorityFeeInstruction = web3_js_1.ComputeBudgetProgram.setComputeUnitPrice({
+        microLamports: microLamports, // This sets a priority fee of 0.001 SOL
+    });
+    instructions.push(priorityFeeInstruction);
+    // Get fresh blockhash
+    const { blockhash, lastValidBlockHeight } = yield connection.getLatestBlockhash('confirmed');
+    console.log('Got fresh blockhash:', blockhash);
+    console.log('Last valid block height:', lastValidBlockHeight);
+    const messageV0 = new web3_js_1.TransactionMessage({
+        payerKey: userWalletPubkey,
+        recentBlockhash: blockhash,
+        instructions
+    }).compileToV0Message();
+    const transaction = new web3_js_1.VersionedTransaction(messageV0);
+    // Only sign with mintKeypair, let the frontend handle the user's signature
+    transaction.sign([mintKeypair]);
+    console.log('Transaction signed with mintKeypair');
+    // Serialize the transaction
+    const serializedTransaction = transaction.serialize();
+    console.log('Transaction serialized successfully');
+    // Convert to base64 string
+    const base64Transaction = Buffer.from(serializedTransaction).toString('base64');
+    console.log('Transaction converted to base64');
+    // Send response with necessary data for frontend
+    res.status(200).json({
+        success: true,
+        data: {
+            serializedTransaction: base64Transaction,
+            mintAddress: mintKeypair.publicKey.toString(),
+            lastValidBlockHeight,
+            blockhash,
+        }
+    });
+}));
+try { }
+catch (error) {
+    console.error('Detailed error in create-new:', error);
+    res.status(500).json({
+        success: false,
+        message: 'Error creating token',
+        error: error.message,
+        stack: process.env.NODE_ENV === 'development' ? error.stack : undefined,
+        timestamp: new Date().toISOString()
+    });
+}
+;
+// Configure multer storage
+const storage = multer_1.default.memoryStorage();
+const upload = (0, multer_1.default)({
+    storage: storage,
+    fileFilter: (req, file, cb) => {
+        if (file.mimetype.startsWith('image/')) {
+            cb(null, true);
+        }
+        else {
+            cb(new Error('Only image files are allowed!'));
+        }
+    },
+    limits: {
+        fileSize: 5 * 1024 * 1024, // 5MB limit
+    },
+});
+router.post('/upload-metadata', upload.single('file'), (req, res) => __awaiter(void 0, void 0, void 0, function* () {
+    try {
+        // Extract data from request
+        const { name, symbol, description, twitter, telegram, website } = req.body;
+        // Create form data for IPFS
+        const formData = new form_data_1.default();
+        // Add file if it exists
+        if (req.file) {
+            formData.append('file', req.file.buffer, {
+                filename: 'logo.png',
+                contentType: req.file.mimetype
+            });
+        }
+        // Add metadata fields with null checks
+        formData.append('name', name || '');
+        formData.append('symbol', symbol || '');
+        formData.append('description', description || '');
+        // Only append social links if they exist and aren't "undefined"
+        if (twitter && twitter !== 'undefined')
+            formData.append('twitter', twitter);
+        if (telegram && telegram !== 'undefined')
+            formData.append('telegram', telegram);
+        if (website && website !== 'undefined')
+            formData.append('website', website);
+        formData.append('showName', 'true');
+        console.log('Uploading to IPFS with data:', {
+            name,
+            symbol,
+            description,
+            twitter,
+            telegram,
+            website,
+            hasFile: !!req.file
+        });
+        // Upload to IPFS through pump.fun API
+        const response = yield (0, node_fetch_1.default)('https://pump.fun/api/ipfs', {
+            method: 'POST',
+            body: formData,
+            headers: Object.assign({}, formData.getHeaders())
+        });
+        if (!response.ok) {
+            throw new Error(`IPFS upload failed with status: ${response.status}`);
+        }
+        const ipfsData = yield response.json();
+        // Clean up the metadata before sending response
+        if (ipfsData.metadata) {
+            // Remove undefined social links
+            if (ipfsData.metadata.twitter === 'undefined')
+                delete ipfsData.metadata.twitter;
+            if (ipfsData.metadata.telegram === 'undefined')
+                delete ipfsData.metadata.telegram;
+            if (ipfsData.metadata.website === 'undefined')
+                delete ipfsData.metadata.website;
+        }
+        console.log('IPFS upload successful:', ipfsData);
+        // Send response back to client
         res.status(200).json({
             success: true,
-            data: {
-                serializedTransaction: Buffer.from(serializedTransaction).toString('base64'),
-                mintAddress: mintKeypair.publicKey.toString(),
-                lastValidBlockHeight
-            }
+            message: 'Metadata uploaded successfully',
+            data: ipfsData
         });
     }
     catch (error) {
-        console.error('Error creating token:', error);
+        console.error('Error in /upload-metadata:', error);
         res.status(500).json({
             success: false,
-            message: 'Error creating token',
-            error: error.message
+            message: 'Failed to upload metadata',
+            error: error instanceof Error ? error.message : 'Unknown error'
         });
     }
 }));

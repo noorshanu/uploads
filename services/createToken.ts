@@ -66,11 +66,11 @@ export async function createMetadata(formData: any, keypairType: string, grinded
   ipfsFormData.append("website", formData.website);
   ipfsFormData.append("showName", "true");
 
-  const metadataResponse = await fetch("https://pump.fun/api/ipfs", {
-    method: "POST",
-    body: ipfsFormData,
-    headers: ipfsFormData.getHeaders()
-  });
+  // const metadataResponse = await fetch("https://pump.fun/api/ipfs", {
+  //   method: "POST",
+  //   body: ipfsFormData,
+  //   headers: ipfsFormData.getHeaders()
+  // });
 
   return {
     mintKeypair,

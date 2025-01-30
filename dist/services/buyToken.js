@@ -18,7 +18,7 @@ const nodewallet_1 = __importDefault(require("@coral-xyz/anchor/dist/cjs/nodewal
 const anchor_1 = require("@coral-xyz/anchor");
 const bs58_1 = __importDefault(require("bs58"));
 const getProvider = () => {
-    const connection = new web3_js_1.Connection("https://mainnet.helius-rpc.com/?api-key=f0c11eb0-ccc8-4f5f-afb3-b11308f4e46e");
+    const connection = new web3_js_1.Connection("https://mainnet.helius-rpc.com/?api-key=ee27825c-6a3f-4348-aaa5-aa50215cd54e");
     const wallet = new nodewallet_1.default(new web3_js_1.Keypair());
     return new anchor_1.AnchorProvider(connection, wallet, { commitment: "finalized" });
 };

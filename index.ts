@@ -15,7 +15,11 @@ const app = express();
 
 const corsOptions = {
     credentials: true,
-    origin: ['http://localhost:3000/', "https://pfun.blocktools.ai/"] // Whitelist the domains you want to allow
+    origin: '*', // Allow all origins
+    methods: ['GET', 'POST', 'PUT', 'DELETE', 'OPTIONS'],
+    allowedHeaders: ['Content-Type', 'Authorization', 'Origin', 'Accept', 'X-Requested-With'],
+    exposedHeaders: ['Content-Range', 'X-Content-Range'],
+    maxAge: 600 // Caches preflight request for 10 minutes
 };
 // Connect to MongoDB
 connectDB();

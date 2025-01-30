@@ -71,17 +71,20 @@ router.post('/send-message', (req, res) => __awaiter(void 0, void 0, void 0, fun
     try {
         const { tokenName, tokenSymbol, description, contractAddress, deployerAddress, solAmount, imageUrl, messageType = 'launch' } = req.body;
         let message = '';
+        console.log(imageUrl);
         switch (messageType) {
             case 'launch':
-                message = `${tokenName} ($${tokenSymbol})\n\n` +
+                message = `PUMPFUN MINT BY MINTO \n\n` +
+                    `${tokenName} ($${tokenSymbol})\n\n` +
                     `${description ? `${description}\n\n` : ''}` +
                     `💻 Deployer:\n` +
                     `├ ${deployerAddress}\n` +
-                    `└ ${solAmount} SOL\n\n` +
+                    `${solAmount ? `└ ${solAmount} SOL\n\n` : ''}` +
                     `🔍 Links:\n` +
                     `[Solscan](https://solscan.io/token/${contractAddress}) | ` +
                     `[Birdeye](https://birdeye.so/token/${contractAddress}) | ` +
-                    `[Photon](https://photon.so/token/${contractAddress})\n\n` +
+                    `[Photon](https://photon.so/token/${contractAddress})   | ` +
+                    `[DEXS](https://dexscreener.com/solana/${contractAddress})\n\n` +
                     `📋 Contract:\n\`${contractAddress}\``;
                 break;
         }
@@ -91,21 +94,21 @@ router.post('/send-message', (req, res) => __awaiter(void 0, void 0, void 0, fun
                 [
                     {
                         text: "⚡ Photon",
-                        url: `https://photon-sol.tinyastro.io/en/r/@neilarmsbonk/${contractAddress}`
+                        url: `https://photon-sol.tinyastro.io/en/r/@Minto/${contractAddress}`
                     },
                     {
                         text: "🐕 BONKbot",
-                        url: "https://t.me/bonkbot_bot"
+                        url: "https://t.me/bonkbot_bot?start=ref_9nwue"
                     }
                 ],
                 [
                     {
-                        text: "🐂 BullX",
-                        url: `https://bullx.io/terminal?chainId=1399811149&address=${contractAddress}&r=V3QQRT7CY9C`
+                        text: "🤖 Solana Trading Bot",
+                        url: `https://t.me/SolanaTradingBot?start=H0w3SX6iO`
                     },
                     {
-                        text: "🐎 Trojan",
-                        url: "https://t.me/TrojanSolanaBot"
+                        text: "⚡️ GMGN SOL BOT",
+                        url: "https://t.me/GMGN_sol_bot?start=i_R4HumTUu"
                     }
                 ]
             ]

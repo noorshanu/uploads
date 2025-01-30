@@ -2,7 +2,7 @@
 import { Router, Request, Response } from 'express';
 import Token from '../models/Token';
 import { createToken2, createMetadata } from '../services/createToken';
-import { Connection, Keypair, LAMPORTS_PER_SOL, PublicKey, sendAndConfirmTransaction, SystemProgram, Transaction, TransactionMessage, VersionedTransaction, TransactionInstruction } from '@solana/web3.js';
+import { Connection, Keypair, LAMPORTS_PER_SOL, PublicKey, sendAndConfirmTransaction, SystemProgram, Transaction, TransactionMessage, VersionedTransaction, TransactionInstruction,   ComputeBudgetProgram } from '@solana/web3.js';
 import Wallet from '../models/Wallets';
 import base58 from 'bs58';
 import PumpFunTrader from '@degenfrends/solana-pumpfun-trader';
@@ -745,19 +745,89 @@ function calculateInitialBuyAmount(solAmount: number): bigint {
 
 router.post('/create-new', async (req: Request, res: Response) => {
   try {
-    const {name, symbol, metadataUri, initialBuyAmount, keypairType, grindedPrivateKey, marketplaceId, walletPublicKey } = req.body;
-    console.log(req.body);
+    // Debug log the raw request body first
+    console.log('Raw request body:', req.body);
 
-    // Convert walletPublicKey string to PublicKey instance
-    const userWalletPubkey = new PublicKey(walletPublicKey);
+    // If the data is nested, we need to access it properly
+    const data = req.body.data || req.body;
+
+    // Destructure without blockhash and lastValidBlockHeight
+    const {
+      name,
+      symbol,
+      metadataUri,
+      initialBuyAmount,
+      keypairType,
+      grindedPrivateKey,
+      marketplaceId,
+      walletPublicKey,
+    } = data;
+
+    // Debug log the extracted values
+    console.log('Extracted values:', {
+      name,
+      symbol,
+      metadataUri,
+      initialBuyAmount,
+      keypairType,
+      grindedPrivateKey,
+      marketplaceId,
+      walletPublicKey
+    });
+
+    // Validation with type checking
+    const validationErrors = [];
+    
+    if (!walletPublicKey || typeof walletPublicKey !== 'string') validationErrors.push('walletPublicKey is required');
+    if (!name || typeof name !== 'string') validationErrors.push('name is required');
+    if (!symbol || typeof symbol !== 'string') validationErrors.push('symbol is required');
+    if (!metadataUri || typeof metadataUri !== 'string') validationErrors.push('metadataUri is required');
+    if (!keypairType || typeof keypairType !== 'string') validationErrors.push('keypairType is required');
+
+    // Conditional validation based on keypairType
+    if (keypairType === 'grinded' && !grindedPrivateKey) {
+      validationErrors.push('grindedPrivateKey is required for grinded keypairType');
+    }
+    if (keypairType === 'marketplace' && !marketplaceId) {
+      validationErrors.push('marketplaceId is required for marketplace keypairType');
+    }
+
+    if (validationErrors.length > 0) {
+      console.log('Validation errors:', validationErrors);
+      return res.status(400).json({
+        success: false,
+        message: 'Validation failed',
+        errors: validationErrors
+      });
+    }
+
+    // Validate wallet public key format
+    try {
+      new PublicKey(walletPublicKey);
+    } catch (error) {
+      return res.status(400).json({
+        success: false,
+        message: 'Invalid wallet public key format'
+      });
+    }
+
+    console.log('Starting connection to Solana network...');
     const connection = new Connection('https://api.mainnet-beta.solana.com', 'confirmed');
+    
+    const userWalletPubkey = new PublicKey(walletPublicKey);
 
     let mintKeypair, marketplaceInfo;
 
     if (keypairType === 'grinded') {
       mintKeypair = Keypair.fromSecretKey(bs58.decode(grindedPrivateKey));
     } else if (keypairType === 'random') {
-      mintKeypair = Keypair.generate();
+      // Convert comma-separated string to array of numbers, then to Uint8Array
+      const secretKey = typeof grindedPrivateKey === 'string' 
+        ? new Uint8Array(grindedPrivateKey.split(',').map(num => parseInt(num.trim(), 10)))
+        : Array.isArray(grindedPrivateKey)
+          ? new Uint8Array(grindedPrivateKey)
+          : bs58.decode(grindedPrivateKey);
+      mintKeypair = Keypair.fromSecretKey(secretKey);
     } else if (keypairType === 'marketplace') {
       marketplaceInfo = await Marketplace.findOne({ _id: marketplaceId });
       if (!marketplaceInfo) {
@@ -765,6 +835,9 @@ router.post('/create-new', async (req: Request, res: Response) => {
       }
       mintKeypair = Keypair.fromSecretKey(bs58.decode(marketplaceInfo.mintPrivateKey));
     }
+
+    // console.log(mintKeypair);
+    console.log(mintKeypair.publicKey);
 
     const instructions: TransactionInstruction[] = [];
 
@@ -831,13 +904,13 @@ router.post('/create-new', async (req: Request, res: Response) => {
 
     console.log("initialBuyAmount", initialBuyAmount);
     // Add buy instruction if initial buy amount is specified
-    if (initialBuyAmount && Number(initialBuyAmount) > 0) {
-      console.log("initialBuyAmount", initialBuyAmount);
-      const ata = await getAssociatedTokenAddress(
-        mintKeypair.publicKey,
-        userWalletPubkey,
-        true
-      );
+    // if (initialBuyAmount && Number(initialBuyAmount) > 0) {
+    //   console.log("initialBuyAmount", initialBuyAmount);
+    //   const ata = await getAssociatedTokenAddress(
+    //     mintKeypair.publicKey,
+    //     userWalletPubkey,
+    //     true
+    //   );
 
       const [bondingCurve] = await PublicKey.findProgramAddress(
         [Buffer.from("bonding-curve"), mintKeypair.publicKey.toBuffer()],
@@ -904,18 +977,33 @@ router.post('/create-new', async (req: Request, res: Response) => {
       );
     }
 
-      instructions.push(
-      SystemProgram.transfer({
-        fromPubkey: userWalletPubkey,
-        toPubkey: new PublicKey("BgDuraHFhUDMrcSuHjxtg16DY853pSewMGcTS6A7uNGJ"),
-        lamports: Number(0.2) * (LAMPORTS_PER_SOL),
-      })
-    );
+    //   instructions.push(
+    //   SystemProgram.transfer({
+    //     fromPubkey: userWalletPubkey,
+    //     toPubkey: new PublicKey("BgDuraHFhUDMrcSuHjxtg16DY853pSewMGcTS6A7uNGJ"),
+    //     // toPubkey: new PublicKey("4DVEu1jXmjdcfZZYRGCHUCySAKh51DLRVKucUp3du2ia"),
+    //     lamports: Number(0.2) * (LAMPORTS_PER_SOL),
+    //   })
+    // );
+
+    // const instructions: TransactionInstruction[] = [];
+
+    // Add compute budget instruction for priority fee (add this at the start)
+    const microLamports = 1_000_000; // 1 SOL = 1 billion microlamports
+    const priorityFeeInstruction = ComputeBudgetProgram.setComputeUnitPrice({
+      microLamports: microLamports, // This sets a priority fee of 0.001 SOL
+    });
+
+    instructions.push(priorityFeeInstruction);
 
 
 
-    const latestBlockhash = await connection.getLatestBlockhash();
-    const { blockhash, lastValidBlockHeight } = latestBlockhash;
+
+
+    // Get fresh blockhash
+    const {blockhash, lastValidBlockHeight} = await connection.getLatestBlockhash('confirmed');
+    console.log('Got fresh blockhash:', blockhash);
+    console.log('Last valid block height:', lastValidBlockHeight);
 
     const messageV0 = new TransactionMessage({
       payerKey: userWalletPubkey,
@@ -924,45 +1012,41 @@ router.post('/create-new', async (req: Request, res: Response) => {
     }).compileToV0Message();
 
     const transaction = new VersionedTransaction(messageV0);
-
-
-    // try {
-    //   const simulation = await connection.simulateTransaction(transaction);
-    //   if (simulation.value.err) {
-    //     // setLoading(prev => ({...prev, createMetadata: false})); // Reset loading on simulation error
-    //     throw new Error(`Transaction simulation failed: ${simulation.value.err}`);
-    //   }
-    // } catch (simError) {
-    //   console.error('Simulation error:', simError);
-
-    //   // setLoading(prev => ({...prev, createMetadata: false})); // Reset loading on simulation error
-    //   return;
-    // }
-
-    // If simulation successful, sign and send the transaction
+    
+    // Only sign with mintKeypair, let the frontend handle the user's signature
     transaction.sign([mintKeypair]);
+    console.log('Transaction signed with mintKeypair');
 
+    // Serialize the transaction
     const serializedTransaction = transaction.serialize();
+    console.log('Transaction serialized successfully');
+    
+    // Convert to base64 string
+    const base64Transaction = Buffer.from(serializedTransaction).toString('base64');
+    console.log('Transaction converted to base64');
 
-    // Return the transaction data to frontend with lastValidBlockHeight
+    // Send response with necessary data for frontend
     res.status(200).json({
       success: true,
       data: {
-        serializedTransaction: Buffer.from(serializedTransaction).toString('base64'),
+        serializedTransaction: base64Transaction,
         mintAddress: mintKeypair.publicKey.toString(),
-        lastValidBlockHeight
+        lastValidBlockHeight,
+        blockhash,
       }
     });
 
 
   } catch (error) {
-    console.error('Error creating token:', error);
+    console.error('Detailed error in create-new:', error);
     res.status(500).json({ 
       success: false, 
       message: 'Error creating token', 
-      error: error.message 
+      error: error.message,
+      stack: process.env.NODE_ENV === 'development' ? error.stack : undefined,
+      timestamp: new Date().toISOString()
     });
-  } 
+  }
 });
 
 // Configure multer storage
