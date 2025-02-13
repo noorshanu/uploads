@@ -8,6 +8,7 @@ import projectRoutes from './routes/projectRoutes';
 import transactionRoutes from './routes/transactionRoutes';
 import marketplaceRoutes from './routes/marketPlaceRoutes';
 import telegramRoutes from './routes/telegramRoutes';
+import bumpRoutes from './routes/bumpRoutes';
 
 dotenv.config();
 const app = express();
@@ -25,7 +26,7 @@ const corsOptions = {
 connectDB();
 
 // Middleware
-app.use(cors(corsOptions));
+// app.use(cors(corsOptions));
 app.use(bodyParser.json());
 
 // Routes
@@ -34,6 +35,7 @@ app.use('/api/project', projectRoutes);
 app.use('/api/transaction', transactionRoutes);
 app.use('/api/marketplace', marketplaceRoutes);
 app.use('/api/telegram', telegramRoutes);
+app.use('/api/bump', bumpRoutes);
 
 const PORT = process.env.PORT || 5000;               
 app.listen(PORT, () => console.log(`Server running on port ${PORT}`));

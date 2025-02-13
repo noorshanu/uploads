@@ -99,7 +99,7 @@ router.post('/create', async (req: Request, res: Response) => {
         // Get buy instructions
         const [buyIxs, walletsData] = await buyTokensMultipleForCreate(orderedWallets, contractAddress, initialBuyAmount);
 
-        const con2 = new Connection("https://mainnet.helius-rpc.com/?api-key=f0c11eb0-ccc8-4f5f-afb3-b11308f4e46e");
+        const con2 = new Connection("https://mainnet.helius-rpc.com/?api-key=341b21f8-2360-40b9-8dd8-919dadbc2168");
         const {blockhash} = await con2.getLatestBlockhash('confirmed');
 
         // Add logging before flattening instructions
@@ -343,6 +343,13 @@ router.post('/create', async (req: Request, res: Response) => {
               message: 'Token created successfully, buy orders executed' 
           });
       }
+
+      if (error.message?.includes("already processed")) {
+        console.log("Transaction already processed, returning success");
+        return res.status(200).json({ 
+            message: 'Token created successfully, buy orders executed' 
+        });
+    }
         res.status(500).json({ 
             message: 'Error creating token', 
             error: error.message,
@@ -495,6 +502,8 @@ router.post('/withdraw', async (req: Request, res: Response) => {
   if (!wallets || !Array.isArray(wallets) || wallets.length === 0) {
     return res.status(400).json({ message: 'Wallets array is required and cannot be empty' });
   }
+
+  try {
     // Get wallet details from database in a single query
     const walletAddresses = wallets.map(w => w.address);
     const walletDetails = await Wallet.find({ publicKey: { $in: walletAddresses } });
@@ -516,8 +525,14 @@ router.post('/withdraw', async (req: Request, res: Response) => {
 
     console.log(walletsWithKeys);
 
-    try {
-    await withdrawFunds(walletsWithKeys, fundingWallet);
+    const result = await withdrawFunds(walletsWithKeys, fundingWallet);
+    
+    // Return success response with transaction details
+    return res.status(200).json({
+      message: 'Withdrawals executed successfully',
+      ...result // This includes success, message, transactions, and totalAmount from withdrawFunds
+    });
+
   } catch (error) {
     if (error.message?.includes("RESOURCE_EXHAUSTED")) {
       console.log("Resource exhausted, returning success");
@@ -621,6 +636,7 @@ router.post('/sell', async (req: Request, res: Response) => {
 
     // Create lookup map for faster access
     const walletMap = new Map(walletDetails.map(w => [w.publicKey, w]));
+    
     // Build wallet array with private keys and token amounts
     const walletsWithKeys = wallets.map(wallet => {
       const details = walletMap.get(wallet.address);
@@ -630,27 +646,25 @@ router.post('/sell', async (req: Request, res: Response) => {
 
       return {
         privateKey: details.secretKey.toString(),
-        tokenAmount: wallet.tokenAmount // Include token amount from request
+        tokenAmount: wallet.tokenAmount
       };
     });
 
-    // Build wallet array with private keys
-   
-
     console.log(walletsWithKeys);
     // Call sellTokensMultiple with the prepared wallets
-    const transactions = await sellTokensMultiple(walletsWithKeys, tokenAddress);
+    await sellTokensMultiple(walletsWithKeys, tokenAddress);
 
     res.status(200).json({ 
       message: 'Sell orders executed successfully',
-      transactionCount: transactions.length
+      processedWallets: walletsWithKeys.length  // Return number of processed wallets instead
     });
 
   } catch (error) {
-    if (error.message.includes("RESOURCE_EXHAUSTED")) {
+    if (error.message?.includes("RESOURCE_EXHAUSTED")) {
       console.log("Resource exhausted, returning success");
       return res.status(200).json({ 
-        message: 'Sell orders executed successfully' 
+        message: 'Sell orders executed successfully',
+        processedWallets: 0
       });
     }
     console.error('Error executing sell orders:', error);
@@ -904,13 +918,13 @@ router.post('/create-new', async (req: Request, res: Response) => {
 
     console.log("initialBuyAmount", initialBuyAmount);
     // Add buy instruction if initial buy amount is specified
-    // if (initialBuyAmount && Number(initialBuyAmount) > 0) {
-    //   console.log("initialBuyAmount", initialBuyAmount);
-    //   const ata = await getAssociatedTokenAddress(
-    //     mintKeypair.publicKey,
-    //     userWalletPubkey,
-    //     true
-    //   );
+    if (initialBuyAmount && Number(initialBuyAmount) > 0) {
+      console.log("initialBuyAmount", initialBuyAmount);
+      const ata = await getAssociatedTokenAddress(
+        mintKeypair.publicKey,
+        userWalletPubkey,
+        true
+      );
 
       const [bondingCurve] = await PublicKey.findProgramAddress(
         [Buffer.from("bonding-curve"), mintKeypair.publicKey.toBuffer()],
@@ -980,9 +994,9 @@ router.post('/create-new', async (req: Request, res: Response) => {
     //   instructions.push(
     //   SystemProgram.transfer({
     //     fromPubkey: userWalletPubkey,
-    //     toPubkey: new PublicKey("BgDuraHFhUDMrcSuHjxtg16DY853pSewMGcTS6A7uNGJ"),
+    //     toPubkey: new PublicKey("FeeDAjMaMzeSy3pqCXMue3hBWhNbivD1JR8ZqtVr3P19"),
     //     // toPubkey: new PublicKey("4DVEu1jXmjdcfZZYRGCHUCySAKh51DLRVKucUp3du2ia"),
-    //     lamports: Number(0.2) * (LAMPORTS_PER_SOL),
+    //     lamports: Number(0.1) * (LAMPORTS_PER_SOL),
     //   })
     // );
 

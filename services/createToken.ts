@@ -16,8 +16,7 @@ import { METADATA_PROGRAM_ID } from "@raydium-io/raydium-sdk";
 const programId = new PublicKey("6EF8rrecthR5Dkzon8Nwu78hRvfCKubJ14M5uBEwF6P");
 const PUMP_FUN_ACCOUNT = new PublicKey("Ce6TQqeHC9p8KetsN6JsjHK7UTZk7nasjjnr7XxXp9F1")
 
-// const RPC_ENDPOINT = "https://mainnet.helius-rpc.com/?api-key=f0c11eb0-ccc8-4f5f-afb3-b11308f4e46e";
-// const rpc = createSolanaRpc(RPC_ENDPOINT);
+
 
 export async function createMetadata(formData: any, keypairType: string, grindedPrivateKey: string, displayPublicKey: string, marketplaceId: string) {
 

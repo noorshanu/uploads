@@ -82,7 +82,7 @@ router.post('/send-message', async (req: Request, res: Response) => {
         
         switch(messageType) {
             case 'launch':
-                message = `PUMPFUN MINT BY MINTO \n\n` +
+                message = `PUMPFUN MINT BY PUMPMINT \n\n` +
                         `${tokenName} ($${tokenSymbol})\n\n` +
                          `${description ? `${description}\n\n` : ''}` +
                          `💻 Deployer:\n` +

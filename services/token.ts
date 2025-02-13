@@ -17,10 +17,9 @@ const programId = new PublicKey("6EF8rrecthR5Dkzon8Nwu78hRvfCKubJ14M5uBEwF6P");
 const PUMP_FUN_ACCOUNT = new PublicKey("Ce6TQqeHC9p8KetsN6JsjHK7UTZk7nasjjnr7XxXp9F1")
 
 
-// const con2 = new Connection("https://mainnet.helius-rpc.com/?api-key=f0c11eb0-ccc8-4f5f-afb3-b11308f4e46e", 'confirmed');
 
 
-const con2 = new Connection("https://mainnet.helius-rpc.com/?api-key=2e8cb264-ad9c-4ad9-8f95-4e93388cfda2", "confirmed")
+const con2 = new Connection("https://mainnet.helius-rpc.com/?api-key=341b21f8-2360-40b9-8dd8-919dadbc2168", "confirmed")
 
 
   async function accountExists(connection: Connection, address: PublicKey): Promise<boolean> {
@@ -194,69 +193,127 @@ const con2 = new Connection("https://mainnet.helius-rpc.com/?api-key=2e8cb264-ad
 
   export const fundWallets = async (wallets: { address: string, solAmount: string }[], fundingWallet: string) => {
     if (!fundingWallet) {
-      throw new Error('Funding wallet private key is required');
+        throw new Error('Funding wallet private key is required');
     }
 
     try {
-      const fundingAccount = Keypair.fromSecretKey(bs58.decode(fundingWallet));
-      const transactions: VersionedTransaction[] = [];
-      const { blockhash } = await con2.getLatestBlockhash('confirmed');
+        const fundingAccount = Keypair.fromSecretKey(bs58.decode(fundingWallet));
+        const CHUNK_SIZE = 4; // Process 4 wallets at a time
+        
+        // Split wallets into chunks
+        const walletChunks = chunkArray(wallets, CHUNK_SIZE);
+        console.log(`Processing ${wallets.length} wallets in ${walletChunks.length} chunks`);
 
-      for (const wallet of wallets) {
-        const message = new TransactionMessage({
-          payerKey: fundingAccount.publicKey,
-          recentBlockhash: blockhash,
-          instructions: [
-            SystemProgram.transfer({
-              fromPubkey: fundingAccount.publicKey,
-              toPubkey: new PublicKey(wallet.address),
-              lamports: Number(wallet.solAmount) * LAMPORTS_PER_SOL,
-            })
-          ]
-        }).compileToV0Message();
+        // Process each chunk
+        for (let chunkIndex = 0; chunkIndex < walletChunks.length; chunkIndex++) {
+            console.log(`Processing chunk ${chunkIndex + 1}/${walletChunks.length}`);
+            const chunk = walletChunks[chunkIndex];
+            const transactions: VersionedTransaction[] = [];
+            
+            // Get fresh blockhash for each chunk
+            const { blockhash } = await con2.getLatestBlockhash('confirmed');
 
-        const tx = new VersionedTransaction(message);
-        tx.sign([fundingAccount]);
-        transactions.push(tx);
-      }
+            for (const wallet of chunk) {
+                try {
+                    const message = new TransactionMessage({
+                        payerKey: fundingAccount.publicKey,
+                        recentBlockhash: blockhash,
+                        instructions: [
+                            SystemProgram.transfer({
+                                fromPubkey: fundingAccount.publicKey,
+                                toPubkey: new PublicKey(wallet.address),
+                                lamports: Number(wallet.solAmount) * LAMPORTS_PER_SOL,
+                            })
+                        ]
+                    }).compileToV0Message();
 
-      await sendBundles(5, fundingAccount, transactions);
-      console.log('All transactions sent successfully');
+                    const tx = new VersionedTransaction(message);
+                    tx.sign([fundingAccount]);
+
+                    // Simulate transaction before adding to bundle
+                    try {
+                        const simulation = await con2.simulateTransaction(tx, {
+                            signerPubkeys: [fundingAccount.publicKey]
+                        });
+                        
+                        if (simulation.value.err) {
+                            console.error('Transaction simulation failed:', simulation.value.err);
+                            continue;
+                        }
+                        
+                        console.log(`Transaction simulation successful for wallet ${wallet.address}`);
+                        transactions.push(tx);
+                    } catch (simError) {
+                        console.error(`Simulation error for wallet ${wallet.address}:`, simError);
+                        continue;
+                    }
+                } catch (error) {
+                    console.error(`Error processing wallet ${wallet.address}:`, error);
+                    continue;
+                }
+            }
+
+            // Send transactions in this chunk
+            if (transactions.length > 0) {
+                try {
+                    console.log(`Sending bundle of ${transactions.length} transactions from chunk ${chunkIndex + 1}`);
+                    await sendBundles(5, fundingAccount, transactions);
+                    console.log(`Chunk ${chunkIndex + 1} sent successfully`);
+
+                    // Add delay between chunks if not the last chunk
+                    if (chunkIndex < walletChunks.length - 1) {
+                        console.log('Waiting between chunks...');
+                        await new Promise(resolve => setTimeout(resolve, 2000));
+                    }
+                } catch (error) {
+                    if (error.message.includes("RESOURCE_EXHAUSTED")) {
+                        console.log("Chunk processed successfully despite RESOURCE_EXHAUSTED error");
+                        continue;
+                    }
+                    console.error(`Error sending chunk ${chunkIndex + 1}:`, error);
+                    throw error;
+                }
+            }
+        }
+
+        console.log('All chunks processed successfully');
     } catch (error) {
-      if (error.message.includes("RESOURCE_EXHAUSTED")) {
-        console.log("Wallets funded successfully");
-        return;
+        console.error('Error in fundWallets:', error);
+        throw error;
     }
-      console.error('Error in fundWallets:', error);
-      throw error;
-    }
-  }
+};
 
   export const withdrawFunds = async (wallets: { address: string, privateKey: string }[], fundingWallet: string) => {
     try {
-        const transactions: VersionedTransaction[] = [];
+        const CHUNK_SIZE = 4; // Process 3 wallets at a time
         const results: { address: string; amount: number; success: boolean }[] = [];
-        const { blockhash } = await con2.getLatestBlockhash('confirmed');
+        
+        // Split wallets into chunks
+        const walletChunks = [];
+        for (let i = 0; i < wallets.length; i += CHUNK_SIZE) {
+            walletChunks.push(wallets.slice(i, i + CHUNK_SIZE));
+        }
+        
+        console.log(`Processing ${wallets.length} wallets in ${walletChunks.length} chunks`);
 
-        for (const wallet of wallets) {
-            try {
-                const keypair = Keypair.fromSecretKey(bs58.decode(wallet.privateKey));
-                const balance = await con2.getBalance(keypair.publicKey);
-                console.log("Processing wallet:", keypair.publicKey.toString(), "balance:", balance);
+        // Process each chunk
+        for (let chunkIndex = 0; chunkIndex < walletChunks.length; chunkIndex++) {
+            const chunk = walletChunks[chunkIndex];
+            console.log(`Processing chunk ${chunkIndex + 1}/${walletChunks.length}`);
+            
+            const transactions: VersionedTransaction[] = [];
+            const { blockhash } = await con2.getLatestBlockhash('confirmed');
 
-                // Increased safety margins for fees and rent
-                const rentExemptBalance = await con2.getMinimumBalanceForRentExemption(0);
-               
-                // Calculate transfer amount, leaving enough for fees
-                const transferAmount = Math.floor(balance - (Number(0.009) * LAMPORTS_PER_SOL));
-                console.log({
-                    balance,
-                    rentExemptBalance,
-                    transferAmount,
-                });
-// Only proceed if we have more than 5000 lamports to transfer
-                  console.log("transferAmount", transferAmount)  
-                  const transferIx = SystemProgram.transfer({
+            for (const wallet of chunk) {
+                try {
+                    const keypair = Keypair.fromSecretKey(bs58.decode(wallet.privateKey));
+                    const balance = await con2.getBalance(keypair.publicKey);
+                    console.log("Processing wallet:", keypair.publicKey.toString(), "balance:", balance);
+
+                    const transferAmount = Math.floor(balance - (Number(0.009) * LAMPORTS_PER_SOL));
+                    console.log("transferAmount", transferAmount);
+
+                    const transferIx = SystemProgram.transfer({
                         fromPubkey: keypair.publicKey,
                         toPubkey: new PublicKey(fundingWallet),
                         lamports: transferAmount,
@@ -276,7 +333,7 @@ const con2 = new Connection("https://mainnet.helius-rpc.com/?api-key=2e8cb264-ad
                         const simulation = await con2.simulateTransaction(tx);
                         if (simulation.value.err) {
                             console.log(`Simulation failed for wallet ${keypair.publicKey.toString()}:`, simulation.value.err);
-                            continue; // Skip this wallet if simulation fails
+                            continue;
                         }
                     } catch (simError) {
                         console.error(`Simulation error for wallet ${keypair.publicKey.toString()}:`, simError);
@@ -289,42 +346,43 @@ const con2 = new Connection("https://mainnet.helius-rpc.com/?api-key=2e8cb264-ad
                         amount: transferAmount / LAMPORTS_PER_SOL,
                         success: false
                     });
-               
-            } catch (error) {
-                console.error(`Error processing wallet ${wallet.address}:`, error);
-                results.push({
-                    address: wallet.address,
-                    amount: 0,
-                    success: false
-                });
+                } catch (error) {
+                    console.error(`Error processing wallet ${wallet.address}:`, error);
+                    results.push({
+                        address: wallet.address,
+                        amount: 0,
+                        success: false
+                    });
+                }
+            }
+
+            if (transactions.length > 0) {
+                const keypair = Keypair.fromSecretKey(bs58.decode(chunk[0].privateKey));
+                console.log(`Sending ${transactions.length} transactions from chunk ${chunkIndex + 1}`);
+                await sendBundles(5, keypair, transactions);
+                
+                // Mark transactions in this chunk as successful
+                const startIdx = chunkIndex * CHUNK_SIZE;
+                for (let i = 0; i < transactions.length; i++) {
+                    if (results[startIdx + i]) {
+                        results[startIdx + i].success = true;
+                    }
+                }
+
+                // Add delay between chunks
+                if (chunkIndex < walletChunks.length - 1) {
+                    console.log('Waiting between chunks...');
+                    await new Promise(resolve => setTimeout(resolve, 2000));
+                }
             }
         }
 
-        if (transactions.length > 0) {
-          const keypair = Keypair.fromSecretKey(bs58.decode(wallets[0].privateKey));
-
-            console.log(`Sending ${transactions.length} transactions to Jito`);
-            await sendBundles(5, keypair, transactions);
-            console.log('Transactions sent successfully');
-            
-            results.forEach(result => {
-                result.success = true;
-            });
-
-            return {
-                success: true,
-                message: 'Withdrawal successful',
-                transactions: results,
-                totalAmount: results.reduce((sum, tx) => sum + tx.amount, 0)
-            };
-        } else {
-            return {
-                success: true,
-                message: 'No transactions to process',
-                transactions: results,
-                totalAmount: 0
-            };
-        }
+        return {
+            success: true,
+            message: 'Withdrawal processing completed',
+            transactions: results,
+            totalAmount: results.reduce((sum, tx) => sum + tx.amount, 0)
+        };
 
     } catch (error) {
         console.error('Error in withdrawFunds:', error);
@@ -1252,141 +1310,146 @@ const con2 = new Connection("https://mainnet.helius-rpc.com/?api-key=2e8cb264-ad
   export const sellTokensMultiple = async (wallets: { privateKey: string, tokenAmount: number }[], tokenAddress: string) => {
     console.log(`Starting sellTokensMultiple with ${wallets.length} wallets for token ${tokenAddress}`);
     const mint = new PublicKey(tokenAddress);
-    const transactions: VersionedTransaction[] = [];
+    
+    // Chunk wallets into groups of 4 (similar to buy function)
+    const chunkedWallets = chunkArray(wallets, 4);
+    console.log(`Split wallets into ${chunkedWallets.length} chunks`);
 
-    // Get fresh blockhash once for all transactions
-    const { blockhash, lastValidBlockHeight } = await con2.getLatestBlockhash('confirmed');
-    console.log(`Got blockhash: ${blockhash}`);
+    // Process each chunk
+    for (let chunkIndex = 0; chunkIndex < chunkedWallets.length; chunkIndex++) {
+        console.log(`Processing chunk ${chunkIndex + 1}/${chunkedWallets.length}`);
+        const chunk = chunkedWallets[chunkIndex];
+        const transactions: VersionedTransaction[] = [];
 
-    // Process each wallet
-    for (const wallet of wallets) {
-        try {
-            const keypair = Keypair.fromSecretKey(bs58.decode(wallet.privateKey));
-            console.log(`Processing wallet: ${keypair.publicKey.toString()}`);
+        // Get fresh blockhash for each chunk
+        const { blockhash } = await con2.getLatestBlockhash('confirmed');
+        console.log(`Got fresh blockhash for chunk ${chunkIndex + 1}: ${blockhash}`);
 
-            const instructions: TransactionInstruction[] = [];
+        // Process each wallet in the chunk
+        for (const wallet of chunk) {
+            try {
+                const keypair = Keypair.fromSecretKey(bs58.decode(wallet.privateKey));
+                console.log(`Processing wallet: ${keypair.publicKey.toString()}`);
 
-            const [bondingCurve] = await PublicKey.findProgramAddress(
-              [Buffer.from("bonding-curve"), new PublicKey(mint).toBuffer()],
-              programId
-            );
-          
-            const bondingCurveATA = await getAssociatedTokenAddress(
-              new PublicKey(mint),
-              bondingCurve,
-              true
-            );
+                const instructions: TransactionInstruction[] = [];
+                
+                const [bondingCurve] = await PublicKey.findProgramAddress(
+                  [Buffer.from("bonding-curve"), new PublicKey(mint).toBuffer()],
+                  programId
+                );
+              
+                const bondingCurveATA = await getAssociatedTokenAddress(
+                  new PublicKey(mint),
+                  bondingCurve,
+                  true
+                );
 
-            const ata = await getAssociatedTokenAddress(
-                mint,
-                keypair.publicKey,
-                true
-            );
+                const ata = await getAssociatedTokenAddress(
+                    mint,
+                    keypair.publicKey,
+                    true
+                );
 
+                // Check token balance
+                const tokenAccountInfo = await con2.getTokenAccountBalance(ata);
+                const tokenBalance = tokenAccountInfo.value.uiAmount;
 
+                console.log("Token balance:", tokenBalance);
+                console.log("Sell percentage:", wallet.tokenAmount);
 
-            // Check token balance
-            const tokenAccountInfo = await con2.getTokenAccountBalance(ata);
-            const tokenBalance = tokenAccountInfo.value.uiAmount;
+                // Calculate sell amount in token's smallest units (considering decimals)
+                const decimals = tokenAccountInfo.value.decimals;
+                const percentageToSell = wallet.tokenAmount / 100;
+                const sellAmt = Math.floor(Number(tokenBalance!) * percentageToSell * Math.pow(10, decimals));
 
-            console.log("Token balance:", tokenBalance);
-            console.log("Sell percentage:", wallet.tokenAmount);
+                if (tokenBalance && tokenBalance > 0) {
+                    // Create sell instruction
+                    const sellAmount = BigInt(sellAmt); // Now converting a whole number to BigInt
+                    const sellMaxSol = BigInt(1); // Example max SOL value
+                    const sellBufferData = Buffer.alloc(24);
+                    sellBufferData.write("33e685a4017f83ad", "hex");
+                    sellBufferData.writeBigUInt64LE(sellAmount, 8);
+                    sellBufferData.writeBigInt64LE(sellMaxSol, 16);
 
-            // Calculate sell amount in token's smallest units (considering decimals)
-            const decimals = tokenAccountInfo.value.decimals;
-            const percentageToSell = wallet.tokenAmount / 100;
-            const sellAmt = Math.floor(Number(tokenBalance!) * percentageToSell * Math.pow(10, decimals));
+                    console.log(mint)
 
-            if (tokenBalance && tokenBalance > 0) {
-                // Create sell instruction
-                const sellAmount = BigInt(sellAmt); // Now converting a whole number to BigInt
-                const sellMaxSol = BigInt(1); // Example max SOL value
-                const sellBufferData = Buffer.alloc(24);
-                sellBufferData.write("33e685a4017f83ad", "hex");
-                sellBufferData.writeBigUInt64LE(sellAmount, 8);
-                sellBufferData.writeBigInt64LE(sellMaxSol, 16);
-
-                console.log(mint)
-
-                const sellIx = new TransactionInstruction({
-                    programId: new PublicKey("6EF8rrecthR5Dkzon8Nwu78hRvfCKubJ14M5uBEwF6P"),
-                    keys: [
-                      { pubkey: new PublicKey("4wTV1YmiEkRvAtNtsSGPtUrqRYQMe5SKy2uB4Jjaxnjf"), isSigner: false, isWritable: false },
-                      { pubkey: new PublicKey("CebN5WGQ4jvEPvsVU4EoHEpgzq1VV7AbicfhtW4xC9iM"), isSigner: false, isWritable: true },
-                      { pubkey: mint, isSigner: false, isWritable: false },
-                      { pubkey: bondingCurve, isSigner: false, isWritable: true },
-                      { pubkey: bondingCurveATA, isSigner: false, isWritable: true },
-                      { pubkey: ata, isSigner: false, isWritable: true },
-                      { pubkey: keypair.publicKey, isSigner: true, isWritable: true },
-                      { pubkey: SystemProgram.programId, isSigner: false, isWritable: false },
-                      { pubkey: ASSOCIATED_TOKEN_PROGRAM_ID, isSigner: false, isWritable: false },
-                      { pubkey: TOKEN_PROGRAM_ID, isSigner: false, isWritable: false },
-                      { pubkey: PUMP_FUN_ACCOUNT, isSigner: false, isWritable: false },
-                      { pubkey: programId, isSigner: false, isWritable: false }
-                    ],
-                    data: sellBufferData
-                });
-
-                instructions.push(sellIx);
-
-                // Create and sign transaction
-                const messageV0 = new TransactionMessage({
-                    payerKey: keypair.publicKey,
-                    recentBlockhash: blockhash,
-                    instructions
-                }).compileToV0Message();
-
-                const transaction = new VersionedTransaction(messageV0);
-                transaction.sign([keypair]);
-
-                // Simulate transaction before adding to bundle
-                try {
-                    const simulation = await con2.simulateTransaction(transaction, {
-                        signerPubkeys: [keypair.publicKey]
+                    const sellIx = new TransactionInstruction({
+                        programId: new PublicKey("6EF8rrecthR5Dkzon8Nwu78hRvfCKubJ14M5uBEwF6P"),
+                        keys: [
+                          { pubkey: new PublicKey("4wTV1YmiEkRvAtNtsSGPtUrqRYQMe5SKy2uB4Jjaxnjf"), isSigner: false, isWritable: false },
+                          { pubkey: new PublicKey("CebN5WGQ4jvEPvsVU4EoHEpgzq1VV7AbicfhtW4xC9iM"), isSigner: false, isWritable: true },
+                          { pubkey: mint, isSigner: false, isWritable: false },
+                          { pubkey: bondingCurve, isSigner: false, isWritable: true },
+                          { pubkey: bondingCurveATA, isSigner: false, isWritable: true },
+                          { pubkey: ata, isSigner: false, isWritable: true },
+                          { pubkey: keypair.publicKey, isSigner: true, isWritable: true },
+                          { pubkey: SystemProgram.programId, isSigner: false, isWritable: false },
+                          { pubkey: ASSOCIATED_TOKEN_PROGRAM_ID, isSigner: false, isWritable: false },
+                          { pubkey: TOKEN_PROGRAM_ID, isSigner: false, isWritable: false },
+                          { pubkey: PUMP_FUN_ACCOUNT, isSigner: false, isWritable: false },
+                          { pubkey: programId, isSigner: false, isWritable: false }
+                        ],
+                        data: sellBufferData
                     });
 
-                    console.log("simulation", simulation)
+                    instructions.push(sellIx);
 
-                    if (simulation.value.err) {
-                        console.error('Transaction simulation failed:', simulation.value.err);
-                        throw new Error(`Transaction simulation failed: ${JSON.stringify(simulation.value.err)}`);
+                    // Create and sign transaction
+                    const messageV0 = new TransactionMessage({
+                        payerKey: keypair.publicKey,
+                        recentBlockhash: blockhash,
+                        instructions
+                    }).compileToV0Message();
+
+                    const transaction = new VersionedTransaction(messageV0);
+                    transaction.sign([keypair]);
+
+                    // Simulate transaction before adding to bundle
+                    try {
+                        const simulation = await con2.simulateTransaction(transaction, {
+                            signerPubkeys: [keypair.publicKey]
+                        });
+
+                        console.log("simulation", simulation)
+
+                        if (simulation.value.err) {
+                            console.error('Transaction simulation failed:', simulation.value.err);
+                            throw new Error(`Transaction simulation failed: ${JSON.stringify(simulation.value.err)}`);
+                        }
+
+                        console.log('Transaction simulation successful');
+                    } catch (error) {
+                        console.error('Error simulating transaction:', error);
+                        throw error;
                     }
 
-                    console.log('Transaction simulation successful');
-                } catch (error) {
-                    console.error('Error simulating transaction:', error);
-                    throw error;
+                    console.log(`Created transaction for wallet ${keypair.publicKey.toString()}`);
+                    transactions.push(transaction);
+                } else {
+                    console.log(`No tokens to sell for wallet ${keypair.publicKey.toString()}`);
                 }
+            } catch (error) {
+                console.error(`Failed to process wallet ${wallet.privateKey.slice(0, 8)}...`, error);
+                throw error;
+            }
+        }
 
-                console.log(`Created transaction for wallet ${keypair.publicKey.toString()}`);
-                transactions.push(transaction);
-            } else {
-                console.log(`No tokens to sell for wallet ${keypair.publicKey.toString()}`);
+        // Send transactions for this chunk
+        try {
+            if (transactions.length > 0) {
+                console.log(`Sending bundle of ${transactions.length} transactions for chunk ${chunkIndex + 1}`);
+                const lastWallet = chunk[chunk.length - 1];
+                const lastKeypair = Keypair.fromSecretKey(bs58.decode(lastWallet.privateKey));
+                await sendBundles(5, lastKeypair, transactions);
+                console.log(`Chunk ${chunkIndex + 1} bundle sent successfully`);
             }
         } catch (error) {
-            console.error(`Failed to process wallet ${wallet.privateKey.slice(0, 8)}...`, error);
+            console.error(`Failed to send bundle for chunk ${chunkIndex + 1}:`, error);
             throw error;
         }
     }
 
-    // Send transactions
-    try {
-        if (transactions.length > 0) {
-            console.log(`Sending bundle of ${transactions.length} transactions`);
-            const lastWallet = wallets[wallets.length - 1];
-            const lastKeypair = Keypair.fromSecretKey(bs58.decode(lastWallet.privateKey));
-            await sendBundles(5, lastKeypair, transactions);
-            console.log('Bundle sent successfully');
-        } else {
-            console.log('No transactions to send');
-        }
-    } catch (error) {
-        console.error('Failed to send bundle:', error);
-        throw error;
-    }
-
-    console.log('All transactions processed successfully');
-    return transactions;
+    console.log('All chunks processed successfully');
 };
 
   // Helper function to handle decimal arithmetic with precision
